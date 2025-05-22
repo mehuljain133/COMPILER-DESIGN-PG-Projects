@@ -1,0 +1,161 @@
+# Unit-III Code generation, machine dependent and machine independent optimization techniques.
+
+# Unit-III: Code Generation + Optimizations (machine-independent and machine-dependent)
+
+# AST Node definitions (simplified)
+class Number:
+    def __init__(self, val): self.value = val
+    def __repr__(self): return f"Number({self.value})"
+
+class Variable:
+    def __init__(self, name): self.name = name
+    def __repr__(self): return self.name
+
+class BinOp:
+    def __init__(self, left, op, right): self.left, self.op, self.right = left, op, right
+    def __repr__(self): return f"({self.left} {self.op} {self.right})"
+
+class Assignment:
+    def __init__(self, var, expr): self.var, self.expr = var, expr
+    def __repr__(self): return f"{self.var} = {self.expr}"
+
+class Sequence:
+    def __init__(self, stmts): self.stmts = stmts
+    def __repr__(self): return '\n'.join(map(str, self.stmts))
+
+# --- Code Generator (Three-Address Code) ---
+
+class CodeGenerator:
+    def __init__(self):
+        self.temp_count = 0
+        self.code = []
+
+    def new_temp(self):
+        self.temp_count += 1
+        return f't{self.temp_count}'
+
+    def generate(self, node):
+        method = 'gen_' + type(node).__name__
+        return getattr(self, method)(node)
+
+    def gen_Number(self, node):
+        return str(node.value)
+
+    def gen_Variable(self, node):
+        return node.name
+
+    def gen_BinOp(self, node):
+        left = self.generate(node.left)
+        right = self.generate(node.right)
+        temp = self.new_temp()
+        self.code.append(f'{temp} = {left} {node.op} {right}')
+        return temp
+
+    def gen_Assignment(self, node):
+        expr = self.generate(node.expr)
+        self.code.append(f'{node.var.name} = {expr}')
+
+    def gen_Sequence(self, node):
+        for stmt in node.stmts:
+            self.generate(stmt)
+
+# --- Machine-independent optimizations ---
+
+def constant_folding(code_lines):
+    """
+    Fold constants in instructions like t1 = 2 + 3 => t1 = 5
+    """
+    new_code = []
+    for line in code_lines:
+        parts = line.split('=')
+        lhs = parts[0].strip()
+        rhs = parts[1].strip()
+        # Simple constant folding for binary ops: t = num op num
+        tokens = rhs.split()
+        if len(tokens) == 3:
+            a, op, b = tokens
+            if a.isdigit() and b.isdigit():
+                val = eval(f'{a}{op}{b}')
+                new_code.append(f'{lhs} = {val}')
+                continue
+        new_code.append(line)
+    return new_code
+
+def dead_code_elimination(code_lines):
+    """
+    Remove assignments to temps never used later
+    """
+    used = set()
+    for line in code_lines:
+        # Collect all variables used on right side
+        parts = line.split('=')
+        rhs = parts[1]
+        tokens = rhs.replace('+',' ').replace('-',' ').replace('*',' ').replace('/',' ').split()
+        for t in tokens:
+            if t.startswith('t'):
+                used.add(t.strip())
+    new_code = []
+    for line in reversed(code_lines):
+        lhs = line.split('=')[0].strip()
+        if lhs.startswith('t') and lhs not in used:
+            continue  # dead temp, skip
+        new_code.append(line)
+    new_code.reverse()
+    return new_code
+
+# --- Machine-dependent peephole optimization ---
+
+def peephole_optimize(code_lines):
+    """
+    Simple peephole:
+    Remove redundant moves like t1 = t2 where t2 is never changed between
+    """
+    optimized = []
+    prev = None
+    for i,line in enumerate(code_lines):
+        if i > 0 and prev:
+            # example: t1 = t2 followed by t2 = t1 -> redundant?
+            # For simplicity, remove instructions like t1 = t1
+            lhs, rhs = line.split('=')
+            lhs = lhs.strip()
+            rhs = rhs.strip()
+            if lhs == rhs:
+                continue
+        optimized.append(line)
+        prev = line
+    return optimized
+
+# --- Demo program ---
+
+# Let's build a simple AST for:
+# a = 2 + 3;
+# b = a * 4;
+# c = b + 0;
+ast = Sequence([
+    Assignment(Variable('a'), BinOp(Number(2), '+', Number(3))),
+    Assignment(Variable('b'), BinOp(Variable('a'), '*', Number(4))),
+    Assignment(Variable('c'), BinOp(Variable('b'), '+', Number(0))),
+])
+
+print("Original AST:")
+print(ast)
+print("\n--- Generating code ---")
+cg = CodeGenerator()
+cg.generate(ast)
+for line in cg.code:
+    print(line)
+
+print("\n--- After constant folding ---")
+cf_code = constant_folding(cg.code)
+for line in cf_code:
+    print(line)
+
+print("\n--- After dead code elimination ---")
+dce_code = dead_code_elimination(cf_code)
+for line in dce_code:
+    print(line)
+
+print("\n--- After peephole optimization ---")
+po_code = peephole_optimize(dce_code)
+for line in po_code:
+    print(line)
